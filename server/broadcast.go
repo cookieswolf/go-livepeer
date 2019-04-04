@@ -80,17 +80,13 @@ func selectOrchestrator(n *core.LivepeerNode, cpl core.PlaylistManager) ([]*Broa
 	return sessions, nil
 }
 
-func processSegment(cxn *rtmpConnection, seg *stream.HLSSegment, node *core.LivepeerNode) {
+func processSegment(cxn *rtmpConnection, seg *stream.HLSSegment) {
 
 	nonce := cxn.nonce
 	rtmpStrm := cxn.stream
 	cpl := cxn.pl
 	mid := cxn.mid
 	vProfile := cxn.profile
-
-	cxn.lock.RLock()
-	sess := cxn.sessManager.selectSession(node, cxn.pl)
-	cxn.lock.RUnlock()
 
 	if monitor.Enabled {
 		monitor.LogSegmentEmerged(nonce, seg.SeqNo, len(BroadcastJobVideoProfiles))
@@ -121,6 +117,7 @@ func processSegment(cxn *rtmpConnection, seg *stream.HLSSegment, node *core.Live
 		}
 	}
 
+	sess := cxn.sessManager.selectSession()
 	// Return early under a few circumstances:
 	// View-only (non-transcoded) streams or mid-failover
 	if sess == nil {
@@ -141,6 +138,7 @@ func processSegment(cxn *rtmpConnection, seg *stream.HLSSegment, node *core.Live
 				if monitor.Enabled {
 					monitor.LogSegmentUploadFailed(nonce, seg.SeqNo, monitor.SegmentUploadErrorOS, err.Error())
 				}
+				cxn.sessManager.completeSession(sess)
 				return
 			}
 			seg.Name = uri // hijack seg.Name to convey the uploaded URI
@@ -161,9 +159,9 @@ func processSegment(cxn *rtmpConnection, seg *stream.HLSSegment, node *core.Live
 				cxn.needOrch <- struct{}{}
 			}
 			return
-		} else {
-			cxn.sessManager.completeSession(sess)
 		}
+
+		cxn.sessManager.completeSession(sess)
 
 		// download transcoded segments from the transcoder
 		gotErr := false // only send one error msg per segment list
